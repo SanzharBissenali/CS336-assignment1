@@ -60,8 +60,7 @@ model = transformer_lm(vocab_size=10000, d_model= args.d_model, num_layers=args.
 
 optimizer = AdamW(params=model.parameters(), weight_decay=args.weight_decay)
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")    # For training on my Macbook
+device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 print('The device is', device)
 
 train_ids = np.load('output/np_training_set.npy', mmap_mode='r')
