@@ -7,7 +7,7 @@ from einops import rearrange
 from datetime import datetime
 
 from language_model import transformer_lm, AdamW, cross_entropy_loss, learning_rate_schedule, gradient_clipping
-from data_preprocessing import get_batch, save_checkpoint
+from data_preprocessing import get_batch, save_checkpoint, get_specific_batch
 
 # 1. Initialize the parser
 parser = argparse.ArgumentParser(description="Machine Learning Training Script")
@@ -112,17 +112,50 @@ for i in range(num_steps):
     if i % 100 == 0:
         model.eval()
         with torch.no_grad():
-            val_input, val_label = get_batch(dataset=val_ids, batch_size=int(batch_size*4), context_length=args.max_seq_len, device=device)
-            output = model.forward(val_input)
+            loss_list = []
+            for j in range(20): # Of course this assumes that there are at least 20 batches in the validation set
+                start_index = j * args.batch_size * args.max_seq_len
+                val_input, val_label = get_specific_batch(dataset=val_ids, batch_size=args.batch_size,
+                                                          context_length=args.max_seq_len, start_index= start_index ,device=device)
 
-            output = rearrange(output, "batch_size seq_len vocab_size -> (batch_size seq_len) vocab_size").to(
-                device=device)
-            val_label = rearrange(val_label, "batch_size seq_len -> (batch_size seq_len)").to(device=device)
+                output = model.forward(val_input)
 
-            val_loss = cross_entropy_loss(inputs=output, targets=val_label.long())
-            print(f"At training step {i}, Training Loss is {loss.item()}, and Validation loss is {val_loss.item()}. lr is {lr}.")
-            run.log({"train_loss": loss.item(), "val_loss": val_loss.item(), "lr": lr}, step=i)
+                output = rearrange(output, "batch_size seq_len vocab_size -> (batch_size seq_len) vocab_size").to(
+                    device=device)
+                val_label = rearrange(val_label, "batch_size seq_len -> (batch_size seq_len)").to(device=device)
+
+                val_loss = cross_entropy_loss(inputs=output, targets=val_label.long())
+
+                loss_list.append(val_loss.item())
+
+            val_loss = sum(loss_list) / len(loss_list)
+
+            print(f"At training step {i}, Training Loss is {loss.item()}, and Validation loss is {val_loss}. lr is {lr}.")
+            run.log({"train_loss": loss.item(), "val_loss": val_loss, "lr": lr}, step=i)
         model.train()
+
+# Final evaluation on the validation set
+model.eval()
+with torch.no_grad():
+    loss_list = []
+    num_val_batches = len(val_ids) // (args.batch_size * args.max_seq_len) - 1
+    for k in range(num_val_batches):
+        start_index = k * args.batch_size * args.max_seq_len
+        val_input, val_label = get_specific_batch(dataset=val_ids, batch_size=args.batch_size,
+                                                  context_length=args.max_seq_len, start_index=start_index, device=device)
+
+        output = model.forward(val_input)
+
+        output = rearrange(output, "batch_size seq_len vocab_size -> (batch_size seq_len) vocab_size").to(
+            device=device)
+        val_label = rearrange(val_label, "batch_size seq_len -> (batch_size seq_len)").to(device=device)
+
+        val_loss = cross_entropy_loss(inputs=output, targets=val_label.long())
+
+        loss_list.append(val_loss.item())
+    val_loss = sum(loss_list) / len(loss_list)
+    print(f"At the final stage, Training Loss is {loss.item()}, and Validation loss is {val_loss}. lr is {lr}.")
+    run.log({"train_loss": loss.item(), "val_loss": val_loss, "lr": lr}, step=num_steps)
 
 # Finish the run and upload any remaining data.
 run.finish()
